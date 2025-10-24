@@ -1,388 +1,355 @@
-// CRIE este ficheiro em src/app/components/PontoApp.jsx
+// CRIE OU SUBSTITUA este ficheiro em src/app/components/PontoApp.jsx
 //
-// Este é o "Client Component" - a parte visual e interativa
-// que corre no navegador do seu colaborador.
+// Este é o componente que gere o estado do utilizador (login, ponto, etc.)
 
-"use client"; // <-- Isto marca-o como um "Client Component"
+'use client';
 
-import { useState, useMemo } from 'react';
-// Importamos as nossas "Server Actions" (o backend)
-import { 
-  handlePrimeiroAcesso, 
-  handleLogin, 
-  handleBaterPonto 
-} from '../actions';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+// CORRIGIDO: handlePrimeiroAcesso foi alterado para handleSetupPassword
+import { handleLogin, handleSetupPassword, handleLogout, getTodayUserPoints, handleBaterPonto } from '../actions';
 
-// --- O Componente Principal do Aplicativo ---
+// Estados possíveis da aplicação
+const AppState = {
+  LOADING: 'LOADING',
+  LOGIN: 'LOGIN',
+  SETUP_PASSWORD: 'SETUP_PASSWORD',
+  TIME_TRACKING: 'TIME_TRACKING',
+};
+
+// Componente principal do aplicativo
 export default function PontoApp({ initialDepartamentos, initialUsers }) {
-  
-  // --- Estados de Controlo ---
-  const [departamentos, setDepartamentos] = useState(initialDepartamentos);
-  const [users, setUsers] = useState(initialUsers);
-
-  // --- Estados de Seleção do Utilizador ---
-  const [selectedDep, setSelectedDep] = useState('');
-  const [selectedUser, setSelectedUser] = useState('');
+  const [appState, setAppState] = useState(AppState.LOGIN);
+  const [departamentoId, setDepartamentoId] = useState('');
+  const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
-  
-  // --- Estados de "Ecrã" ---
-  // A 'etapa' controla qual o ecrã que o utilizador vê:
-  // 1. 'LOGIN' (selecionar dep/user)
-  // 2. 'REGISTER_PASS' (primeiro acesso, criar senha)
-  // 3. 'LOGGED_IN' (ecrã principal de bater o ponto)
-  const [etapa, setEtapa] = useState('LOGIN'); 
-  
-  // --- Estados de Dados Pós-Login ---
-  const [currentUser, setCurrentUser] = useState(null);
-  const [registros, setRegistros] = useState([]);
-  const [relatorio, setRelatorio] = useState(''); // O texto do relatório de saída
-
-  // --- Estados de UI ---
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [nomeUsuario, setNomeUsuario] = useState('');
+  const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
+  const [relatorio, setRelatorio] = useState('');
+  const [pontosHoje, setPontosHoje] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
 
-  // --- Lógica de UI ---
-
-  // Filtra a lista de utilizadores SÓ do departamento selecionado
+  // Filtra utilizadores pelo departamento selecionado
   const usersFiltrados = useMemo(() => {
-    if (!selectedDep) return [];
-    return users.filter(u => u.departamentoId === selectedDep);
-  }, [selectedDep, users]);
+    return initialUsers.filter(u => u.departamentoId === departamentoId);
+  }, [departamentoId, initialUsers]);
 
-  // Verifica se o utilizador selecionado já tem senha ou não
-  const isPrimeiroAcesso = useMemo(() => {
-    if (!selectedUser) return false;
-    const user = users.find(u => u.id === selectedUser);
-    // Verificamos o 'password: false' que veio do 'getInitialData'
-    // Se o backend não nos enviou um 'password' (que é o caso, pois é 'false'),
-    // mas nós ainda não verificámos, assumimos que é o primeiro acesso.
-    // O 'user.password' aqui *não* é a senha, é só um campo.
-    // O fluxo é: o 'actions.js' nunca manda a senha. O 'page.js' passa
-    // os utilizadores para aqui. A lógica de "tem senha?" é feita
-    // 100% no backend (no handleLogin/handlePrimeiroAcesso).
-    // A nossa lógica aqui é mais simples: se o user selecionou,
-    // mostramos o campo de senha.
-    
-    // A lógica de "primeiro acesso" vs "login normal" será
-    // tratada pelo 'handleSubmitLogin'
-    return null; // A lógica de primeiro acesso será feita no backend
-  }, [selectedUser, users]);
+  // Determina o estado atual do ponto (ENTRADA ou SAIDA)
+  const pontoStatus = useMemo(() => {
+    const lastPoint = pontosHoje.length > 0 ? pontosHoje[pontosHoje.length - 1] : null;
+    // Se o último ponto foi ENTRADA, o próximo é SAIDA. Caso contrário, é ENTRADA.
+    return lastPoint && lastPoint.tipo === 'ENTRADA' ? 'SAIDA' : 'ENTRADA';
+  }, [pontosHoje]);
 
-  // Define qual o próximo tipo de batida (Entrada ou Saída)
-  const proximoTipoPonto = useMemo(() => {
-    if (registros.length === 0) return 'ENTRADA';
-    const ultimoRegistro = registros[registros.length - 1];
-    return ultimoRegistro.tipo === 'ENTRADA' ? 'SAIDA' : 'ENTRADA';
-  }, [registros]);
-  
+  // Função para buscar os pontos do dia (usada após login e após bater ponto)
+  const fetchPoints = useCallback(async (id) => {
+    if (!id) return;
+    const points = await getTodayUserPoints(id);
+    setPontosHoje(points);
+  }, []);
 
-  // --- Funções de Ação (que chamam o Backend) ---
+  // --- HANDLERS ---
 
-  // Chamada quando o utilizador clica em "Entrar" ou "Criar Senha"
-  const handleSubmitLogin = async (e) => {
+  // Lógica principal de login
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
+    setStatusMessage({ text: '', type: '' });
     setIsLoading(true);
-    setError('');
 
-    // Vamos tentar fazer o login normal primeiro
-    const loginResult = await handleLogin(selectedUser, password);
-    
-    // SUCESSO NO LOGIN!
-    if (loginResult.user) {
-      setCurrentUser(loginResult.user);
-      setRegistros(loginResult.registros || []);
-      setEtapa('LOGGED_IN');
-    } 
-    // O utilizador não tem senha (primeiro acesso)
-    else if (loginResult.error.includes("não configurado")) {
-      setEtapa('REGISTER_PASS');
-    } 
-    // Senha incorreta ou outro erro
-    else {
-      setError(loginResult.error);
-    }
-    
-    setIsLoading(false);
-  };
-  
-  // Chamada SÓ no ecrã de "Criar Senha"
-  const handleSubmitPrimeiroAcesso = async (e) => {
-    e.preventDefault();
-    if (password.length < 4) {
-      setError("A senha deve ter pelo menos 4 caracteres.");
+    if (!userId || !password) {
+      setStatusMessage({ text: 'Por favor, selecione um utilizador e insira a senha.', type: 'error' });
+      setIsLoading(false);
       return;
     }
-    
-    setIsLoading(true);
-    setError('');
-    
-    const registerResult = await handlePrimeiroAcesso(selectedUser, password);
-    
-    if (registerResult.user) {
-      // Sucesso! Agora fazemos o login automaticamente
-      await handleSubmitLogin(e); 
-    } else {
-      setError(registerResult.error);
-    }
-    
+
+    const result = await handleLogin({ userId, password });
     setIsLoading(false);
+
+    if (result.success) {
+      if (result.needsSetup) {
+        setAppState(AppState.SETUP_PASSWORD);
+      } else {
+        setNomeUsuario(initialUsers.find(u => u.id === userId)?.nome || 'Utilizador');
+        await fetchPoints(userId);
+        setAppState(AppState.TIME_TRACKING);
+      }
+    } else {
+      setStatusMessage({ text: result.message, type: 'error' });
+      setPassword('');
+    }
   };
 
-  // Chamada quando clica em "Bater Ponto"
-  const handleBaterPontoClick = async () => {
+  // Lógica para criar a senha (Primeiro Acesso)
+  const handleSetupSubmit = async (e) => {
+    e.preventDefault();
+    setStatusMessage({ text: '', type: '' });
     setIsLoading(true);
-    setError('');
-    
-    const result = await handleBaterPonto(
-      currentUser.id, 
-      proximoTipoPonto, 
-      proximoTipoPonto === 'SAIDA' ? relatorio : null
-    );
-    
-    if (result.error) {
-      setError(result.error);
+
+    if (newPassword.length < 6) {
+      setStatusMessage({ text: 'A senha deve ter pelo menos 6 caracteres.', type: 'error' });
+      setIsLoading(false);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setStatusMessage({ text: 'As senhas não coincidem.', type: 'error' });
+      setIsLoading(false);
+      return;
+    }
+
+    const result = await handleSetupPassword({ userId, newPassword });
+    setIsLoading(false);
+
+    if (result.success) {
+      setNomeUsuario(result.user.nome);
+      await fetchPoints(userId);
+      setAppState(AppState.TIME_TRACKING);
     } else {
-      // Sucesso!
-      // A página vai recarregar automaticamente por causa do 'revalidatePath'
-      // que o 'handleBaterPonto' chamou.
-      // Por agora, apenas limpamos o relatório.
+      setStatusMessage({ text: result.message, type: 'error' });
+    }
+  };
+
+  // Bater o Ponto (Check-in/Check-out)
+  const handlePointSubmit = async (e) => {
+    e.preventDefault();
+    setStatusMessage({ text: '', type: '' });
+    setIsLoading(true);
+
+    if (pontoStatus === 'SAIDA' && relatorio.length < 10) {
+      setStatusMessage({ text: 'Por favor, detalhe o seu relatório (mínimo 10 caracteres).', type: 'error' });
+      setIsLoading(false);
+      return;
+    }
+
+    const result = await handleBaterPonto({ userId, tipo: pontoStatus, relatorio });
+    setIsLoading(false);
+
+    if (result.success) {
+      setStatusMessage({ text: `Ponto de ${pontoStatus} registado com sucesso!`, type: 'success' });
       setRelatorio('');
-      
-      // Numa v2, poderíamos atualizar o estado 'registros' localmente
-      // em vez de forçar um recarregamento.
-      
-      // Forçamos o recarregamento da página para buscar os novos dados
-      window.location.reload();
+      await fetchPoints(userId);
+    } else {
+      setStatusMessage({ text: result.message, type: 'error' });
     }
-    
-    setIsLoading(false);
-  };
-  
-  // --- Funções de Logout/Trocar Utilizador ---
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setSelectedUser('');
-    setSelectedDep('');
-    setPassword('');
-    setRegistros([]);
-    setError('');
-    setEtapa('LOGIN');
   };
 
-  // --- Renderização dos Ecrãs ---
+  // --- COMPONENTES DE RENDERIZAÇÃO ---
 
-  // Ecrã 1: LOGIN
-  if (etapa === 'LOGIN') {
-    return (
-      <div className="bg-accent text-light p-8 rounded-lg shadow-2xl animate-fade-in">
-        <h1 className="font-title text-4xl text-center mb-2">SISTEMA DE PONTO</h1>
-        <h2 className="font-title text-2xl text-primary text-center mb-8">VULCANO v1.0</h2>
-        
-        <form onSubmit={handleSubmitLogin}>
-          <div className="mb-4">
-            <label htmlFor="departamento" className="block text-sm font-medium text-light mb-1">Departamento</label>
-            <select 
-              id="departamento"
-              value={selectedDep}
-              onChange={(e) => {
-                setSelectedDep(e.target.value);
-                setSelectedUser(''); // Limpa o utilizador ao trocar de dep
-              }}
-              className="w-full p-3 bg-accent-dark border border-accent-light rounded-md text-light focus:outline-none focus:ring-2 focus:ring-primary"
-            >
-              <option value="">Selecione o departamento...</option>
-              {departamentos.map(dep => (
-                <option key={dep.id} value={dep.id}>{dep.nome}</option>
-              ))}
-            </select>
-          </div>
+  // 1. Tela de Login/Seleção
+  const renderLogin = () => (
+    <form onSubmit={handleLoginSubmit} className="space-y-4">
+      <h1 className="text-3xl font-title text-light mb-6">REGISTO DE PONTO</h1>
 
-          {selectedDep && (
-            <div className="mb-4 animate-fade-in">
-              <label htmlFor="usuario" className="block text-sm font-medium text-light mb-1">Utilizador</label>
-              <select 
-                id="usuario"
-                value={selectedUser}
-                onChange={(e) => setSelectedUser(e.target.value)}
-                disabled={!selectedDep}
-                className="w-full p-3 bg-accent-dark border border-accent-light rounded-md text-light focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="">Selecione o seu nome...</option>
-                {usersFiltrados.map(user => (
-                  <option key={user.id} value={user.id}>{user.nome}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {selectedUser && (
-            <div className="mb-6 animate-fade-in">
-              <label htmlFor="password" className="block text-sm font-medium text-light mb-1">Senha</label>
-              <input 
-                type="password"
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full p-3 bg-accent-dark border border-accent-light rounded-md text-light focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder="****"
-              />
-            </div>
-          )}
-          
-          {error && (
-            <p className="text-red-400 text-center mb-4 animate-shake">{error}</p>
-          )}
-
-          <button 
-            type="submit"
-            disabled={!selectedUser || !password || isLoading}
-            className="w-full bg-primary text-light font-bold p-4 rounded-md font-title text-lg
-                       hover:bg-primary-dark transition-all duration-300
-                       disabled:bg-accent-light disabled:cursor-not-allowed"
-          >
-            {isLoading ? "Aguarde..." : "ENTRAR"}
-          </button>
-        </form>
+      <div className="space-y-2">
+        <label htmlFor="departamento" className="text-sm font-bold text-light">Departamento</label>
+        <select
+          id="departamento"
+          value={departamentoId}
+          onChange={(e) => {
+            setDepartamentoId(e.target.value);
+            setUserId(''); // Limpa o usuário ao mudar o departamento
+            setPassword('');
+          }}
+          className="w-full p-2 bg-accent-light text-light border-0 rounded-md focus:ring-primary focus:border-primary"
+        >
+          <option value="">-- Selecione o Departamento --</option>
+          {initialDepartamentos.map(d => (
+            <option key={d.id} value={d.id}>{d.nome}</option>
+          ))}
+        </select>
       </div>
-    );
-  }
 
-  // Ecrã 2: REGISTAR SENHA (Primeiro Acesso)
-  if (etapa === 'REGISTER_PASS') {
-    return (
-      <div className="bg-accent text-light p-8 rounded-lg shadow-2xl animate-fade-in">
-        <h1 className="font-title text-3xl text-center mb-4">PRIMEIRO ACESSO</h1>
-        <p className="text-center mb-6">Olá, {users.find(u => u.id === selectedUser)?.nome}. Vimos que é o seu primeiro acesso. Por favor, crie uma senha.</p>
-        
-        <form onSubmit={handleSubmitPrimeiroAcesso}>
-          <div className="mb-6">
-            <label htmlFor="new_password" className="block text-sm font-medium text-light mb-1">Nova Senha (mín. 4 caracteres)</label>
-            <input 
-              type="password"
-              id="new_password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-3 bg-accent-dark border border-accent-light rounded-md text-light focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="****"
+      <div className="space-y-2">
+        <label htmlFor="user" className="text-sm font-bold text-light">Utilizador</label>
+        <select
+          id="user"
+          value={userId}
+          onChange={(e) => {
+            setUserId(e.target.value);
+            setPassword(''); // Limpa a senha ao mudar o usuário
+          }}
+          disabled={!departamentoId}
+          className="w-full p-2 bg-accent-light text-light border-0 rounded-md focus:ring-primary focus:border-primary disabled:opacity-50"
+        >
+          <option value="">-- Selecione o seu Nome --</option>
+          {usersFiltrados.map(u => (
+            <option key={u.id} value={u.id}>{u.nome}</option>
+          ))}
+        </select>
+      </div>
+
+      {userId && (
+        <div className="space-y-2">
+          <label htmlFor="password" className="text-sm font-bold text-light">Senha</label>
+          <input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full p-2 bg-accent-light text-light border-0 rounded-md focus:ring-primary focus:border-primary"
+            placeholder="Insira a sua senha"
+          />
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={!userId || isLoading}
+        className="w-full py-3 mt-4 font-bold font-title uppercase tracking-wider bg-primary text-light rounded-md hover:bg-primary/80 transition disabled:opacity-50"
+      >
+        {isLoading ? 'A CARREGAR...' : 'ENTRAR'}
+      </button>
+
+      {statusMessage.text && (
+        <p className={`text-center text-sm p-2 rounded-md ${statusMessage.type === 'error' ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'}`}>
+          {statusMessage.text}
+        </p>
+      )}
+    </form>
+  );
+
+  // 2. Tela de Criação de Senha (Primeiro Acesso)
+  const renderSetupPassword = () => (
+    <form onSubmit={handleSetupSubmit} className="space-y-4">
+      <h1 className="text-3xl font-title text-light mb-4">PRIMEIRO ACESSO</h1>
+      <p className="text-light/80 mb-6">Por favor, defina uma senha segura para a sua conta.</p>
+
+      <div className="space-y-2">
+        <label htmlFor="newPassword" className="text-sm font-bold text-light">Nova Senha (min. 6 caracteres)</label>
+        <input
+          id="newPassword"
+          type="password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          className="w-full p-2 bg-accent-light text-light border-0 rounded-md focus:ring-primary focus:border-primary"
+          placeholder="Nova Senha"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="confirmPassword" className="text-sm font-bold text-light">Confirmar Senha</label>
+        <input
+          id="confirmPassword"
+          type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          className="w-full p-2 bg-accent-light text-light border-0 rounded-md focus:ring-primary focus:border-primary"
+          placeholder="Confirme a Senha"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={isLoading || newPassword.length < 6 || newPassword !== confirmPassword}
+        className="w-full py-3 mt-4 font-bold font-title uppercase tracking-wider bg-primary text-light rounded-md hover:bg-primary/80 transition disabled:opacity-50"
+      >
+        {isLoading ? 'A GUARDAR...' : 'CRIAR SENHA'}
+      </button>
+
+      {statusMessage.text && (
+        <p className={`text-center text-sm p-2 rounded-md ${statusMessage.type === 'error' ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'}`}>
+          {statusMessage.text}
+        </p>
+      )}
+    </form>
+  );
+
+  // 3. Tela de Bater Ponto e Histórico
+  const renderTimeTracking = () => (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center pb-4 border-b border-accent-light">
+        <h1 className="text-3xl font-title text-light">BEM-VINDO, {nomeUsuario.toUpperCase()}</h1>
+        <button
+          onClick={handleLogout}
+          className="text-sm text-primary hover:text-primary/80 font-bold"
+        >
+          SAIR
+        </button>
+      </div>
+
+      {/* Seção de Bater Ponto */}
+      <form onSubmit={handlePointSubmit} className="space-y-4">
+        <h2 className="text-2xl font-title text-light">Ação Atual: <span className={pontoStatus === 'ENTRADA' ? 'text-green-500' : 'text-red-500'}>{pontoStatus}</span></h2>
+
+        {pontoStatus === 'SAIDA' && (
+          <div className="space-y-2">
+            <label htmlFor="relatorio" className="text-sm font-bold text-light">Relatório do Período (Obrigatório)</label>
+            <textarea
+              id="relatorio"
+              value={relatorio}
+              onChange={(e) => setRelatorio(e.target.value)}
+              rows="4"
+              className="w-full p-2 bg-accent-light text-light border-0 rounded-md focus:ring-primary focus:border-primary placeholder-gray-500"
+              placeholder="Ex: Tarefas concluídas: Finalização do relatório X, Correção de bug Y, Reunião com a equipa."
             />
+            <p className="text-xs text-light/50">Mínimo 10 caracteres.</p>
           </div>
-          
-          {error && (
-            <p className="text-red-400 text-center mb-4 animate-shake">{error}</p>
-          )}
+        )}
 
-          <button 
-            type="submit"
-            disabled={!password || isLoading}
-            className="w-full bg-primary text-light font-bold p-4 rounded-md font-title text-lg
-                       hover:bg-primary-dark transition-all duration-300
-                       disabled:bg-accent-light disabled:cursor-not-allowed"
-          >
-            {isLoading ? "A guardar..." : "CRIAR SENHA E ENTRAR"}
-          </button>
-          
-          <button 
-            type="button"
-            onClick={handleLogout} // Volta ao ecrã de login
-            className="w-full text-center text-primary-light mt-4 text-sm"
-          >
-            Cancelar
-          </button>
-        </form>
-      </div>
-    );
-  }
+        <button
+          type="submit"
+          disabled={isLoading || (pontoStatus === 'SAIDA' && relatorio.length < 10)}
+          className={`w-full py-4 mt-4 font-bold font-title uppercase tracking-wider rounded-md transition disabled:opacity-50 ${pontoStatus === 'ENTRADA' ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'} text-light`}
+        >
+          {isLoading ? 'A REGISTRAR...' : `REGISTRAR ${pontoStatus}`}
+        </button>
 
-  // Ecrã 3: LOGADO (Bater Ponto)
-  if (etapa === 'LOGGED_IN' && currentUser) {
-    const isSaida = proximoTipoPonto === 'SAIDA';
-    
-    return (
-      <div className="bg-accent text-light p-8 rounded-lg shadow-2xl animate-fade-in w-full">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="font-title text-3xl text-light">{currentUser.nome}</h1>
-            <p className="text-primary-light -mt-1">{currentUser.cargo === 'DIRETOR' ? 'Diretor(a)' : 'Membro'}</p>
-          </div>
-          <button 
-            onClick={handleLogout}
-            className="text-accent-light hover:text-primary transition-colors"
-            title="Sair / Trocar Utilizador"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-          </button>
-        </div>
+        {statusMessage.text && (
+          <p className={`text-center text-sm p-2 rounded-md ${statusMessage.type === 'error' ? 'bg-red-900 text-red-200' : 'bg-green-900 text-green-200'}`}>
+            {statusMessage.text}
+          </p>
+        )}
+      </form>
 
-        {/* --- Formulário de Bater Ponto --- */}
-        <div className="space-y-4">
-          {isSaida && (
-            <div className="animate-fade-in">
-              <label htmlFor="relatorio" className="block text-sm font-medium text-light mb-1">
-                Relatório de Saída (Opcional)
-              </label>
-              <textarea
-                id="relatorio"
-                rows="3"
-                value={relatorio}
-                onChange={(e) => setRelatorio(e.target.value)}
-                className="w-full p-3 bg-accent-dark border border-accent-light rounded-md text-light focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder="O que produziu hoje?"
-              ></textarea>
-            </div>
-          )}
-
-          {error && (
-            <p className="text-red-400 text-center mb-4 animate-shake">{error}</p>
-          )}
-
-          <button 
-            type="button"
-            onClick={handleBaterPontoClick}
-            disabled={isLoading}
-            className={`w-full text-light font-bold p-6 rounded-md font-title text-2xl
-                       transition-all duration-300
-                       disabled:bg-accent-light disabled:cursor-not-allowed
-                       ${isSaida 
-                         ? 'bg-red-600 hover:bg-red-700' 
-                         : 'bg-green-600 hover:bg-green-700'
-                       }`}
-          >
-            {isLoading 
-              ? "A registar..." 
-              : (isSaida ? "REGISTAR SAÍDA" : "REGISTAR ENTRADA")
-            }
-          </button>
-        </div>
-        
-        {/* --- Registos de Hoje --- */}
-        <div className="mt-8">
-          <h3 className="font-title text-xl text-primary mb-3">Registos de Hoje</h3>
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-            {registros.length === 0 && (
-              <p className="text-accent-light text-sm">Ainda não há registos hoje.</p>
-            )}
-            {registros.map((ponto) => (
-              <div 
-                key={ponto.id} 
-                className={`flex justify-between items-center p-3 rounded
-                           ${ponto.tipo === 'ENTRADA' ? 'bg-green-900/50' : 'bg-red-900/50'}`}
-              >
-                <span className="font-bold">{ponto.tipo}</span>
-                <span className="text-sm">
-                  {new Date(ponto.horario).toLocaleTimeString('pt-BR', {
-                    hour: '2-digit', minute: '2-digit'
-                  })}
-                </span>
-              </div>
+      {/* Histórico de Pontos do Dia */}
+      <div className="pt-4 border-t border-accent-light">
+        <h2 className="text-2xl font-title text-light mb-4">PONTOS DE HOJE ({pontosHoje.length})</h2>
+        {pontosHoje.length === 0 ? (
+          <p className="text-light/70">Nenhum ponto registado hoje.</p>
+        ) : (
+          <ul className="space-y-3">
+            {pontosHoje.map((p, index) => (
+              <li key={p.id} className={`p-3 rounded-md shadow-md ${p.tipo === 'ENTRADA' ? 'bg-accent-light/50 border-l-4 border-green-500' : 'bg-accent-light/50 border-l-4 border-red-500'}`}>
+                <div className="flex justify-between items-center text-sm font-bold">
+                  <span className={p.tipo === 'ENTRADA' ? 'text-green-400' : 'text-red-400'}>{p.tipo}</span>
+                  <span className="text-light/70">{new Date(p.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                </div>
+                {p.relatorio && (
+                  <p className="text-xs text-light/50 mt-1 italic break-words">
+                    Relatório: {p.relatorio.substring(0, 75)}...
+                  </p>
+                )}
+              </li>
             ))}
-          </div>
-        </div>
-        
+          </ul>
+        )}
       </div>
-    );
+    </div>
+  );
+
+  // --- RENDERIZAÇÃO PRINCIPAL ---
+  let content;
+
+  // Lógica para determinar qual tela mostrar
+  switch (appState) {
+    case AppState.LOADING:
+      content = <p className="text-light text-center font-title">A CARREGAR...</p>;
+      break;
+    case AppState.SETUP_PASSWORD:
+      content = renderSetupPassword();
+      break;
+    case AppState.TIME_TRACKING:
+      content = renderTimeTracking();
+      break;
+    case AppState.LOGIN:
+    default:
+      content = renderLogin();
+      break;
   }
 
-  // Ecrã de Fallback (não deve acontecer)
-  return <p>A carregar...</p>;
+  return (
+    <div className="w-full bg-accent text-light p-6 rounded-xl shadow-2xl">
+      {content}
+    </div>
+  );
 }
-
