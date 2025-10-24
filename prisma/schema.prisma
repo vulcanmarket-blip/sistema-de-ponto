@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  relationMode = "prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma" 
+}
+
+datasource db {
+  directUrl = env("DATABASE_URL_NON_POOLING")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// --- Enum para os Cargos (evita erros de digitação) ---
+enum Cargo {
+  DIRETOR
+  MEMBRO
+}
+
+// --- Tabela para os Departamentos ---
+model Departamento {
+  id    String @id @default(cuid())
+  nome  String @unique
+
+  users User[]
+}
+
+// --- Tabela para os Usuários (Colaboradores) ---
+model User {
+  id       String   @id @default(cuid())
+  nome     String
+  password String? // O '?' significa que é opcional (null)
+
+  cargo Cargo @default(MEMBRO)
+
+  departamento   Departamento @relation(fields: [departamentoId], references: [id])
+  departamentoId String
+
+  pontos Ponto[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// --- Tabela para as Batidas de Ponto ---
+model Ponto {
+  id      String   @id @default(cuid())
+  horario DateTime @default(now())
+  tipo    String // "ENTRADA" ou "SAIDA"
+
+  relatorio String? // O '?' significa que este campo é opcional
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String // Chave estrangeira
+
+  createdAt DateTime @default(now())
+}
