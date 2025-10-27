@@ -6,21 +6,22 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint"
   },
   "dependencies": {
-    "@prisma/client": "^6.18.0",
-    "bcryptjs": "3.0.2",
-    "next": "16.0.0",
-    "prisma": "^6.18.0",
-    "react": "19.2.0",
-    "react-dom": "19.2.0"
+    "@prisma/client": "^5.17.0", // Mantenha a sua versão ou atualize se quiser
+    "bcryptjs": "^2.4.3",
+    "next": "16.0.0", // Use a versão exata do Next.js instalada
+    "react": "^18",
+    "react-dom": "^18"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.16",
-    "autoprefixer": "^10.4.21",
-    "eslint": "^9",
-    "eslint-config-next": "16.0.0",
-    "tailwindcss": "^4"
+    "@tailwindcss/postcss": "latest", // Atualizado
+    "autoprefixer": "latest",        // Atualizado
+    "eslint": "^9",                  // Mantido (ou use a sua versão)
+    "eslint-config-next": "16.0.0",  // Mantido (ou use a sua versão)
+    "postcss": "latest",             // Atualizado
+    "prisma": "^5.17.0",             // Mantenha a sua versão do prisma
+    "tailwindcss": "latest"          // Atualizado
   }
 }
