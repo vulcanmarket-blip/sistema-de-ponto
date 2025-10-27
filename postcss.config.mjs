@@ -1,8 +1,9 @@
-    // GARANTA QUE APENAS ESTE CÓDIGO ESTÁ NO FICHEIRO
-    import tailwindcss from 'tailwindcss';
+    // Versão final usando @tailwindcss/postcss
+    import tailwindcss from '@tailwindcss/postcss'; // <- Alterado aqui
     import autoprefixer from 'autoprefixer';
 
     export default {
       plugins: [tailwindcss, autoprefixer],
     };
     
+
