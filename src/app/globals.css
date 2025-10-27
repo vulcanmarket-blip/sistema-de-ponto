@@ -1,3 +1,4 @@
+/* Verifique se o conteúdo é EXATAMENTE este */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,3 +6,4 @@
 body {
   @apply bg-light text-accent;
 }
+
